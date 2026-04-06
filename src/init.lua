@@ -5,7 +5,17 @@ ffi.cdef [[
   typedef struct git_commit     git_commit;
   typedef struct git_object     git_object;
   typedef struct git_reference  git_reference;
-  typedef struct git_signature  git_signature;
+
+  typedef struct {
+    char *name;
+    char *email;
+    struct {
+      int64_t time;
+      int offset;
+      char sign;
+    } when;
+  } git_signature;
+
   typedef struct git_index      git_index;
   typedef struct git_remote     git_remote;
 
@@ -75,7 +85,7 @@ lib.git_libgit2_init()
 ---@class git2.ffi.Signature: ffi.cdata*
 ---@field name string
 ---@field email string
----@field when_time integer
+---@field when { time: integer, offset: integer, sign: string }
 
 -- value types
 
@@ -95,7 +105,6 @@ lib.git_libgit2_init()
 
 -- helpers
 
-local sigLayout = ffi.typeof("struct { char *name; char *email; int64_t when_time; int when_offset; } *")
 
 ---@param code integer
 local function check(code)
@@ -116,8 +125,7 @@ end
 ---@param sig git2.ffi.Signature
 ---@return git2.Sig
 local function wrapSig(sig)
-	local s = ffi.cast(sigLayout, sig)
-	return { name = ffi.string(s.name), email = ffi.string(s.email), time = tonumber(s.when_time) }
+	return { name = ffi.string(sig.name), email = ffi.string(sig.email), time = tonumber(sig.when.time) }
 end
 
 ---@param c git2.ffi.Commit
