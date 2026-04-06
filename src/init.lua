@@ -63,58 +63,38 @@ local lib = ffi.load(here .. (sep == "\\" and "git2.dll" or "libgit2.so"))
 
 lib.git_libgit2_init()
 
--- ffi.cdata* phantom types for LuaCATS
+-- ffi phantom types
 
 ---@class git2.ffi.Oid: ffi.cdata*
----@field id number[]
-
 ---@class git2.ffi.Repository: ffi.cdata*
-
 ---@class git2.ffi.Commit: ffi.cdata*
-
 ---@class git2.ffi.Object: ffi.cdata*
-
 ---@class git2.ffi.Reference: ffi.cdata*
-
 ---@class git2.ffi.Index: ffi.cdata*
-
 ---@class git2.ffi.Remote: ffi.cdata*
-
 ---@class git2.ffi.Signature: ffi.cdata*
 ---@field name string
 ---@field email string
 ---@field when_time integer
 
--- Lua-land value types
+-- value types
 
 ---@class git2.Sig
 ---@field name string
 ---@field email string
----@field time number Unix timestamp
+---@field time number
 
 ---@class git2.Commit
----@field id string 40-char hex SHA
----@field message string Full commit message
----@field summary string First line of message
+---@field id string
+---@field message string
+---@field summary string
 ---@field author git2.Sig
 ---@field committer git2.Sig
----@field time number Unix timestamp
+---@field time number
 ---@field parents string[]
 
----@class git2.Repo
----@field path fun(): string Absolute path to the .git directory
----@field workdir fun(): string|nil Working directory, nil for bare repos
----@field isBare fun(): boolean
----@field headUnborn fun(): boolean True when repo has no commits yet
----@field head fun(): string SHA of HEAD commit
----@field commitLookup fun(sha: string): git2.Commit
----@field revparse fun(spec: string): string Resolve any refspec to a SHA
----@field indexAdd fun(relpath: string)
----@field indexRemove fun(relpath: string)
----@field indexWrite fun()
----@field indexWriteTree fun(): string Tree SHA
----@field fetch fun(remote: string)
----@field free fun()
+-- helpers
+
 local sigLayout = ffi.typeof("struct { char *name; char *email; int64_t when_time; int when_offset; } *")
 
 ---@param code integer
@@ -158,121 +138,136 @@ local function wrapCommit(c)
 	}
 end
 
----@param path string
----@param bare boolean?
+-- Repo class
+
+---@class git2.Repo
+---@field _repo git2.ffi.Repository
+local Repo = {}
+Repo.__index = Repo
+
+---@param repo git2.ffi.Repository
 ---@return git2.Repo
-local function openRepo(path, bare)
-	local rp = ffi.new("git_repository*[1]")
-	if bare ~= nil then
-		check(lib.git_repository_init(rp, path, bare and 1 or 0))
-	else
-		check(lib.git_repository_open(rp, path))
-	end
-	---@type git2.ffi.Repository
-	local repo = rp[0]
-
-	---@type git2.Repo
-	local M = {}
-
-	---@return string
-	function M.path() return ffi.string(lib.git_repository_path(repo)) end
-
-	---@return string|nil
-	function M.workdir()
-		local p = lib.git_repository_workdir(repo)
-		return p ~= nil and ffi.string(p) or nil
-	end
-
-	---@return boolean
-	function M.isBare() return lib.git_repository_is_bare(repo) == 1 end
-
-	---@return boolean
-	function M.headUnborn() return lib.git_repository_head_unborn(repo) == 1 end
-
-	---@return string
-	function M.head()
-		local ref = ffi.new("git_reference*[1]")
-		check(lib.git_repository_head(ref, repo))
-		local sha = oidStr(lib.git_reference_target(ref[0]))
-		lib.git_reference_free(ref[0])
-		return sha
-	end
-
-	---@param sha string
-	---@return git2.Commit
-	function M.commitLookup(sha)
-		local oid = ffi.new("git_oid")
-		check(lib.git_oid_fromstr(oid, sha))
-		local cp = ffi.new("git_commit*[1]")
-		check(lib.git_commit_lookup(cp, repo, oid))
-		local info = wrapCommit(cp[0])
-		lib.git_commit_free(cp[0])
-		return info
-	end
-
-	---@param spec string
-	---@return string
-	function M.revparse(spec)
-		local op = ffi.new("git_object*[1]")
-		check(lib.git_revparse_single(op, repo, spec))
-		local sha = oidStr(lib.git_object_id(op[0]))
-		lib.git_object_free(op[0])
-		return sha
-	end
-
-	---@generic T
-	---@param fn fun(idx: git2.ffi.Index): T
-	---@return T
-	local function withIndex(fn)
-		local ip = ffi.new("git_index*[1]")
-		check(lib.git_repository_index(ip, repo))
-		local result = fn(ip[0])
-		lib.git_index_free(ip[0])
-		return result
-	end
-
-	---@param relpath string
-	function M.indexAdd(relpath)    withIndex(function(i) check(lib.git_index_add_bypath(i, relpath)) end) end
-
-	---@param relpath string
-	function M.indexRemove(relpath) withIndex(function(i) check(lib.git_index_remove_bypath(i, relpath)) end) end
-
-	function M.indexWrite()         withIndex(function(i) check(lib.git_index_write(i)) end) end
-
-	---@return string
-	function M.indexWriteTree()
-		return withIndex(function(i)
-			local oid = ffi.new("git_oid")
-			check(lib.git_index_write_tree(oid, i))
-			return oidStr(oid)
-		end)
-	end
-
-	---@param remoteName string
-	function M.fetch(remoteName)
-		local rmt = ffi.new("git_remote*[1]")
-		check(lib.git_remote_lookup(rmt, repo, remoteName))
-		check(lib.git_remote_fetch(rmt[0], nil, nil, nil))
-		lib.git_remote_free(rmt[0])
-	end
-
-	function M.free() lib.git_repository_free(repo) end
-
-	return M
+function Repo.new(repo)
+	return setmetatable({ _repo = repo }, Repo)
 end
+
+---@return string
+function Repo:path()
+	return ffi.string(lib.git_repository_path(self._repo))
+end
+
+---@return string|nil
+function Repo:workdir()
+	local p = lib.git_repository_workdir(self._repo)
+	return p ~= nil and ffi.string(p) or nil
+end
+
+---@return boolean
+function Repo:isBare()
+	return lib.git_repository_is_bare(self._repo) == 1
+end
+
+---@return boolean
+function Repo:headUnborn()
+	return lib.git_repository_head_unborn(self._repo) == 1
+end
+
+---@return string
+function Repo:head()
+	local ref = ffi.new("git_reference*[1]")
+	check(lib.git_repository_head(ref, self._repo))
+	local sha = oidStr(lib.git_reference_target(ref[0]))
+	lib.git_reference_free(ref[0])
+	return sha
+end
+
+---@param sha string
+---@return git2.Commit
+function Repo:commitLookup(sha)
+	local oid = ffi.new("git_oid")
+	check(lib.git_oid_fromstr(oid, sha))
+	local cp = ffi.new("git_commit*[1]")
+	check(lib.git_commit_lookup(cp, self._repo, oid))
+	local info = wrapCommit(cp[0])
+	lib.git_commit_free(cp[0])
+	return info
+end
+
+---@param spec string
+---@return string
+function Repo:revparse(spec)
+	local op = ffi.new("git_object*[1]")
+	check(lib.git_revparse_single(op, self._repo, spec))
+	local sha = oidStr(lib.git_object_id(op[0]))
+	lib.git_object_free(op[0])
+	return sha
+end
+
+---@param relpath string
+function Repo:indexAdd(relpath)
+	local ip = ffi.new("git_index*[1]")
+	check(lib.git_repository_index(ip, self._repo))
+	check(lib.git_index_add_bypath(ip[0], relpath))
+	lib.git_index_free(ip[0])
+end
+
+---@param relpath string
+function Repo:indexRemove(relpath)
+	local ip = ffi.new("git_index*[1]")
+	check(lib.git_repository_index(ip, self._repo))
+	check(lib.git_index_remove_bypath(ip[0], relpath))
+	lib.git_index_free(ip[0])
+end
+
+function Repo:indexWrite()
+	local ip = ffi.new("git_index*[1]")
+	check(lib.git_repository_index(ip, self._repo))
+	check(lib.git_index_write(ip[0]))
+	lib.git_index_free(ip[0])
+end
+
+---@return string
+function Repo:indexWriteTree()
+	local ip = ffi.new("git_index*[1]")
+	check(lib.git_repository_index(ip, self._repo))
+	local oid = ffi.new("git_oid")
+	check(lib.git_index_write_tree(oid, ip[0]))
+	lib.git_index_free(ip[0])
+	return oidStr(oid)
+end
+
+---@param remoteName string
+function Repo:fetch(remoteName)
+	local rmt = ffi.new("git_remote*[1]")
+	check(lib.git_remote_lookup(rmt, self._repo, remoteName))
+	check(lib.git_remote_fetch(rmt[0], nil, nil, nil))
+	lib.git_remote_free(rmt[0])
+end
+
+function Repo:free()
+	lib.git_repository_free(self._repo)
+end
+
+-- module
 
 ---@class git2
 local git2 = {}
 
----Open an existing repository.
 ---@param path string
 ---@return git2.Repo
-function git2.open(path) return openRepo(path) end
+function git2.open(path)
+	local rp = ffi.new("git_repository*[1]")
+	check(lib.git_repository_open(rp, path))
+	return Repo.new(rp[0])
+end
 
----Initialise a new repository.
 ---@param path string
 ---@param bare boolean?
 ---@return git2.Repo
-function git2.init(path, bare) return openRepo(path, bare or false) end
+function git2.init(path, bare)
+	local rp = ffi.new("git_repository*[1]")
+	check(lib.git_repository_init(rp, path, bare and 1 or 0))
+	return Repo.new(rp[0])
+end
 
 return git2
