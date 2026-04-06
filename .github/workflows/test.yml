@@ -15,9 +15,7 @@ jobs:
           - os: ubuntu-22.04-arm
             deps: sudo apt-get install -y cmake libssl-dev
           - os: windows-latest
-            deps: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
           - os: windows-11-arm
-            deps: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
 
     runs-on: ${{ matrix.os }}
 
@@ -26,8 +24,13 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install dependencies
+      - name: Install dependencies (Linux)
+        if: matrix.deps != ''
         run: ${{ matrix.deps }}
+
+      - name: Setup cmake (Windows ARM64)
+        if: matrix.os == 'windows-11-arm'
+        uses: jwlawson/actions-setup-cmake@v2
 
       - name: Setup lde
         uses: lde-org/setup-lde@master

@@ -1,20 +1,27 @@
 local test = require("lde-test")
 local git2 = require("git2-sys")
 
-local tmpBase = os.tmpname()
-os.remove(tmpBase)
+local sep = string.sub(package.config, 1, 1)
+local isWindows = sep == "\\"
+
+local tmpBase = (os.getenv("TEMP") or os.getenv("TMPDIR") or "/tmp") .. sep .. "git2-sys-test-" .. tostring(os.time())
 
 local function mkTmp(suffix)
 	local dir = tmpBase .. suffix
-	os.execute('mkdir -p "' .. dir .. '"')
+	if isWindows then
+		os.execute('mkdir "' .. dir .. '"')
+	else
+		os.execute('mkdir -p "' .. dir .. '"')
+	end
 	return dir
 end
 
 local function mkCommit(dir, msg)
+	local touch = isWindows and ('type nul > "' .. dir .. sep .. 'f"') or ('touch "' .. dir .. '/f"')
 	os.execute('git -C "' .. dir .. '" init')
 	os.execute('git -C "' .. dir .. '" config user.email "t@t.com"')
 	os.execute('git -C "' .. dir .. '" config user.name "T"')
-	os.execute('touch "' .. dir .. '/f"')
+	os.execute(touch)
 	os.execute('git -C "' .. dir .. '" add f')
 	os.execute('git -C "' .. dir .. '" commit -m "' .. msg .. '"')
 end
@@ -47,21 +54,14 @@ end)
 
 test.it("commitLookup returns correct metadata", function()
 	local dir = mkTmp("meta")
-	os.execute('git -C "' .. dir .. '" init || true')
-	os.execute('mkdir -p "' .. dir .. '"')
-	os.execute('git -C "' .. dir .. '" init')
-	os.execute('git -C "' .. dir .. '" config user.email "a@b.com"')
-	os.execute('git -C "' .. dir .. '" config user.name "Alice"')
-	os.execute('touch "' .. dir .. '/f"')
-	os.execute('git -C "' .. dir .. '" add f')
-	os.execute('git -C "' .. dir .. '" commit -m "hello world"')
+	mkCommit(dir, "hello world")
 	local repo = git2.open(dir)
 	local sha = repo.head()
 	local c = repo.commitLookup(sha)
 	test.equal(c.id, sha)
 	test.truthy(c.summary:find("hello world"))
-	test.equal(c.author.name, "Alice")
-	test.equal(c.author.email, "a@b.com")
+	test.equal(c.author.name, "T")
+	test.equal(c.author.email, "t@t.com")
 	test.truthy(c.time > 0)
 end)
 
