@@ -23,7 +23,8 @@ ffi.cdef [[
   typedef struct { const char *message; int klass; } git_error;
 
   const git_error *git_error_last(void);
-  int git_libgit2_init(void);
+  int  git_libgit2_init(void);
+  void git_libgit2_shutdown(void);
 
   int  git_repository_open(git_repository **out, const char *path);
   int  git_repository_init(git_repository **out, const char *path, unsigned is_bare);
@@ -277,5 +278,9 @@ function git2.init(path, bare)
 	check(lib.git_repository_init(rp, path, bare and 1 or 0))
 	return Repo.new(rp[0])
 end
+
+-- Call git_libgit2_shutdown when the module is GC'd to avoid a segfault on DLL unload.
+-- The closure keeps `lib` alive until after shutdown runs.
+git2._gc = ffi.gc(ffi.new("char[1]"), function() lib.git_libgit2_shutdown() end)
 
 return git2
