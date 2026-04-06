@@ -114,7 +114,7 @@ lib.git_libgit2_init()
 ---@field indexWrite fun()
 ---@field indexWriteTree fun(): string Tree SHA
 ---@field fetch fun(remote: string)
-
+---@field free fun()
 local sigLayout = ffi.typeof("struct { char *name; char *email; int64_t when_time; int when_offset; } *")
 
 ---@param code integer
@@ -169,7 +169,7 @@ local function openRepo(path, bare)
 		check(lib.git_repository_open(rp, path))
 	end
 	---@type git2.ffi.Repository
-	local repo = ffi.gc(rp[0], lib.git_repository_free)
+	local repo = rp[0]
 
 	---@type git2.Repo
 	local M = {}
@@ -255,6 +255,8 @@ local function openRepo(path, bare)
 		check(lib.git_remote_fetch(rmt[0], nil, nil, nil))
 		lib.git_remote_free(rmt[0])
 	end
+
+	function M.free() lib.git_repository_free(repo) end
 
 	return M
 end
