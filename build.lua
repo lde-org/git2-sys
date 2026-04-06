@@ -13,8 +13,9 @@ local function exec(cmd)
 end
 
 local build = src .. sep .. "build"
-exec('cmake -S "' .. src .. '" -B "' .. build .. '" -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_CLI=OFF -DUSE_SSH=OFF -DUSE_HTTPS=OpenSSL')
-exec('cmake --build "' .. build .. '" --config Release -j' .. (isWindows and "" or "$(nproc)"))
+local https = isWindows and "WinHTTP" or "OpenSSL"
+exec('cmake -S "' .. src .. '" -B "' .. build .. '" -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_CLI=OFF -DUSE_SSH=OFF -DUSE_HTTPS=' .. https)
+exec('cmake --build "' .. build .. '" --config Release' .. (isWindows and "" or " -j$(nproc)"))
 
 if isWindows then
     exec('copy "' .. build .. '\\Release\\git2.dll" "' .. outLib .. '"')

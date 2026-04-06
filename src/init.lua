@@ -58,7 +58,8 @@ ffi.cdef [[
 ]]
 
 local here = debug.getinfo(1, "S").source:sub(2):match("(.*[/\\])") or ""
-local lib = ffi.load(here .. "libgit2.so")
+local sep = string.sub(package.config, 1, 1)
+local lib = ffi.load(here .. (sep == "\\" and "git2.dll" or "libgit2.so"))
 
 lib.git_libgit2_init()
 
