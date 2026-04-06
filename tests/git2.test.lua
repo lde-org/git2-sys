@@ -1,0 +1,73 @@
+local test = require("lde-test")
+local git2 = require("git2-sys")
+
+local tmpBase = os.tmpname()
+os.remove(tmpBase)
+
+local function mkTmp(suffix)
+	local dir = tmpBase .. suffix
+	os.execute('mkdir -p "' .. dir .. '"')
+	return dir
+end
+
+local function mkCommit(dir, msg)
+	os.execute('git -C "' .. dir .. '" init')
+	os.execute('git -C "' .. dir .. '" config user.email "t@t.com"')
+	os.execute('git -C "' .. dir .. '" config user.name "T"')
+	os.execute('touch "' .. dir .. '/f"')
+	os.execute('git -C "' .. dir .. '" add f')
+	os.execute('git -C "' .. dir .. '" commit -m "' .. msg .. '"')
+end
+
+test.it("init creates a non-bare repo", function()
+	local repo = git2.init(mkTmp("init"))
+	test.truthy(repo.path():find(".git"))
+	test.equal(repo.isBare(), false)
+	test.equal(repo.headUnborn(), true)
+end)
+
+test.it("init bare creates a bare repo", function()
+	local repo = git2.init(mkTmp("bare"), true)
+	test.equal(repo.isBare(), true)
+end)
+
+test.it("open existing repo works", function()
+	local src = debug.getinfo(1, "S").source:sub(2):match("(.*[/\\])")
+	local repo = git2.open(src .. "..")
+	test.truthy(repo.path())
+	test.equal(repo.isBare(), false)
+end)
+
+test.it("head returns a 40-char sha", function()
+	local dir = mkTmp("head")
+	mkCommit(dir, "init")
+	local repo = git2.open(dir)
+	test.equal(#repo.head(), 40)
+end)
+
+test.it("commitLookup returns correct metadata", function()
+	local dir = mkTmp("meta")
+	os.execute('git -C "' .. dir .. '" init || true')
+	os.execute('mkdir -p "' .. dir .. '"')
+	os.execute('git -C "' .. dir .. '" init')
+	os.execute('git -C "' .. dir .. '" config user.email "a@b.com"')
+	os.execute('git -C "' .. dir .. '" config user.name "Alice"')
+	os.execute('touch "' .. dir .. '/f"')
+	os.execute('git -C "' .. dir .. '" add f')
+	os.execute('git -C "' .. dir .. '" commit -m "hello world"')
+	local repo = git2.open(dir)
+	local sha = repo.head()
+	local c = repo.commitLookup(sha)
+	test.equal(c.id, sha)
+	test.truthy(c.summary:find("hello world"))
+	test.equal(c.author.name, "Alice")
+	test.equal(c.author.email, "a@b.com")
+	test.truthy(c.time > 0)
+end)
+
+test.it("revparse HEAD matches head()", function()
+	local dir = mkTmp("rev")
+	mkCommit(dir, "rev")
+	local repo = git2.open(dir)
+	test.equal(repo.revparse("HEAD"), repo.head())
+end)
