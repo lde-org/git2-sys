@@ -193,9 +193,9 @@ local function openRepo(path, bare)
 	function M.head()
 		local ref = ffi.new("git_reference*[1]")
 		check(lib.git_repository_head(ref, repo))
-		---@type git2.ffi.Reference
-		local r = ffi.gc(ref[0], lib.git_reference_free)
-		return oidStr(lib.git_reference_target(r))
+		local sha = oidStr(lib.git_reference_target(ref[0]))
+		lib.git_reference_free(ref[0])
+		return sha
 	end
 
 	---@param sha string
@@ -205,9 +205,9 @@ local function openRepo(path, bare)
 		check(lib.git_oid_fromstr(oid, sha))
 		local cp = ffi.new("git_commit*[1]")
 		check(lib.git_commit_lookup(cp, repo, oid))
-		---@type git2.ffi.Commit
-		local c = ffi.gc(cp[0], lib.git_commit_free)
-		return wrapCommit(c)
+		local info = wrapCommit(cp[0])
+		lib.git_commit_free(cp[0])
+		return info
 	end
 
 	---@param spec string
@@ -215,9 +215,9 @@ local function openRepo(path, bare)
 	function M.revparse(spec)
 		local op = ffi.new("git_object*[1]")
 		check(lib.git_revparse_single(op, repo, spec))
-		---@type git2.ffi.Object
-		local o = ffi.gc(op[0], lib.git_object_free)
-		return oidStr(lib.git_object_id(o))
+		local sha = oidStr(lib.git_object_id(op[0]))
+		lib.git_object_free(op[0])
+		return sha
 	end
 
 	---@generic T
@@ -226,9 +226,9 @@ local function openRepo(path, bare)
 	local function withIndex(fn)
 		local ip = ffi.new("git_index*[1]")
 		check(lib.git_repository_index(ip, repo))
-		---@type git2.ffi.Index
-		local idx = ffi.gc(ip[0], lib.git_index_free)
-		return fn(idx)
+		local result = fn(ip[0])
+		lib.git_index_free(ip[0])
+		return result
 	end
 
 	---@param relpath string
@@ -252,9 +252,8 @@ local function openRepo(path, bare)
 	function M.fetch(remoteName)
 		local rmt = ffi.new("git_remote*[1]")
 		check(lib.git_remote_lookup(rmt, repo, remoteName))
-		---@type git2.ffi.Remote
-		local remote = ffi.gc(rmt[0], lib.git_remote_free)
-		check(lib.git_remote_fetch(remote, nil, nil, nil))
+		check(lib.git_remote_fetch(rmt[0], nil, nil, nil))
+		lib.git_remote_free(rmt[0])
 	end
 
 	return M
