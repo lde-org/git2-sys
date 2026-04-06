@@ -16,6 +16,10 @@ jobs:
             deps: sudo apt-get install -y cmake libssl-dev
           - os: windows-latest
           - os: windows-11-arm
+          - os: macos-15
+            deps: brew install cmake openssl
+          - os: macos-15-intel
+            deps: brew install cmake openssl
 
     runs-on: ${{ matrix.os }}
 
@@ -24,8 +28,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install dependencies (Linux)
-        if: matrix.deps != ''
+      - name: Install dependencies
+        if: matrix.deps
         run: ${{ matrix.deps }}
 
       - name: Setup cmake (Windows ARM64)
