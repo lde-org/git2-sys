@@ -16,14 +16,16 @@ local function mkTmp(suffix)
 	return dir
 end
 
+local null = isWindows and ">nul 2>&1" or ">>/dev/null 2>&1"
+
 local function mkCommit(dir, msg)
 	local touch = isWindows and ('type nul > "' .. dir .. sep .. 'f"') or ('touch "' .. dir .. '/f"')
-	os.execute('git -C "' .. dir .. '" init')
+	os.execute('git -C "' .. dir .. '" init ' .. null)
 	os.execute('git -C "' .. dir .. '" config user.email "t@t.com"')
 	os.execute('git -C "' .. dir .. '" config user.name "T"')
 	os.execute(touch)
-	os.execute('git -C "' .. dir .. '" add f')
-	os.execute('git -C "' .. dir .. '" commit -m "' .. msg .. '"')
+	os.execute('git -C "' .. dir .. '" add f ' .. null)
+	os.execute('git -C "' .. dir .. '" commit -m "' .. msg .. '" ' .. null)
 end
 
 test.it("init creates a non-bare repo", function()
