@@ -79,3 +79,23 @@ test.it("revparse HEAD matches head()", function()
 	test.equal(repo:revparse("HEAD"), repo:head())
 	repo:free()
 end)
+
+-- NOTE: requires network access
+test.it("clone clones a remote repo", function()
+	local dir = mkTmp("clone") .. sep .. "repo"
+	local repo = git2.clone("https://github.com/lde-org/lde", dir)
+	test.truthy(repo:workdir())
+	test.equal(repo:headUnborn(), false)
+	test.equal(#repo:head(), 40)
+	repo:free()
+	local f = io.open(dir .. sep .. "README.md", "r")
+	test.truthy(f)
+	if f then f:close() end
+end)
+
+test.it("clone with branch checks out the right branch", function()
+	local dir = mkTmp("clone-branch") .. sep .. "repo"
+	local repo = git2.clone("https://github.com/lde-org/lde", dir, "master")
+	test.equal(repo:headUnborn(), false)
+	repo:free()
+end)

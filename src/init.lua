@@ -18,13 +18,26 @@ ffi.cdef [[
 
   typedef struct git_index      git_index;
   typedef struct git_remote     git_remote;
+  typedef struct git_submodule  git_submodule;
 
   typedef struct { unsigned char id[20]; } git_oid;
   typedef struct { const char *message; int klass; } git_error;
 
+  /* opaque options structs — sized to match the ABI, initialized via _init */
+  typedef struct { char _[416]; } git_clone_options;
+  typedef struct { char _[376]; } git_submodule_update_options;
+
   const git_error *git_error_last(void);
   int  git_libgit2_init(void);
   void git_libgit2_shutdown(void);
+
+  int  git_clone_options_init(git_clone_options *opts, unsigned int version);
+  int  git_clone(git_repository **out, const char *url, const char *local_path, const git_clone_options *options);
+
+  int  git_submodule_update_options_init(git_submodule_update_options *opts, unsigned int version);
+  int  git_submodule_foreach(git_repository *repo, int (*cb)(git_submodule *sm, const char *name, void *payload), void *payload);
+  int  git_submodule_update(git_submodule *submodule, int init, git_submodule_update_options *options);
+  void git_submodule_free(git_submodule *submodule);
 
   int  git_repository_open(git_repository **out, const char *path);
   int  git_repository_init(git_repository **out, const char *path, unsigned is_bare);
@@ -253,6 +266,19 @@ function Repo:fetch(remoteName)
 	lib.git_remote_free(rmt[0])
 end
 
+function Repo:updateSubmodules()
+	local repo = self._repo
+	local opts = ffi.new("git_submodule_update_options")
+	lib.git_submodule_update_options_init(opts, 1)
+	local cb = ffi.cast("int (*)(git_submodule*, const char*, void*)", function(sm, _, _)
+		lib.git_submodule_update(sm, 1, opts)
+		return 0
+	end)
+	local ret = lib.git_submodule_foreach(repo, cb, nil)
+	cb:free()
+	check(ret)
+end
+
 function Repo:free()
 	lib.git_repository_free(self._repo)
 end
@@ -276,6 +302,25 @@ end
 function git2.init(path, bare)
 	local rp = ffi.new("git_repository*[1]")
 	check(lib.git_repository_init(rp, path, bare and 1 or 0))
+	return Repo.new(rp[0])
+end
+
+---@param url string
+---@param path string
+---@param branch string?
+---@return git2.Repo
+function git2.clone(url, path, branch)
+	local rp = ffi.new("git_repository*[1]")
+	local opts = nil
+	if branch then
+		local o = ffi.new("git_clone_options")
+		lib.git_clone_options_init(o, 1)
+		-- checkout_branch is a const char* at offset 376; cast to set it
+		local ptr = ffi.cast("const char**", ffi.cast("char*", o) + 376)
+		ptr[0] = branch
+		opts = o
+	end
+	check(lib.git_clone(rp, url, path, opts))
 	return Repo.new(rp[0])
 end
 
