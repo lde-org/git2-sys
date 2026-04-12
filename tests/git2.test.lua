@@ -6,6 +6,8 @@ local isWindows = sep == "\\"
 
 local tmpBase = (os.getenv("TEMP") or os.getenv("TMPDIR") or "/tmp") .. sep .. "git2-sys-test-" .. tostring(os.time())
 
+---@param suffix string
+---@return string
 local function mkTmp(suffix)
 	local dir = tmpBase .. suffix
 	if isWindows then
@@ -18,6 +20,8 @@ end
 
 local null = isWindows and ">nul 2>&1" or ">>/dev/null 2>&1"
 
+---@param dir string
+---@param msg string
 local function mkCommit(dir, msg)
 	local touch = isWindows and ('type nul > "' .. dir .. sep .. 'f"') or ('touch "' .. dir .. '/f"')
 	os.execute('git -C "' .. dir .. '" init ' .. null)
@@ -26,6 +30,26 @@ local function mkCommit(dir, msg)
 	os.execute(touch)
 	os.execute('git -C "' .. dir .. '" add f ' .. null)
 	os.execute('git -C "' .. dir .. '" commit -m "' .. msg .. '" ' .. null)
+end
+
+---@param dir string
+---@param filename string
+---@param msg string
+local function addCommit(dir, filename, msg)
+	local touch = isWindows and ('type nul > "' .. dir .. sep .. filename .. '"')
+	                          or ('touch "' .. dir .. '/' .. filename .. '"')
+	os.execute(touch)
+	os.execute('git -C "' .. dir .. '" add "' .. filename .. '" ' .. null)
+	os.execute('git -C "' .. dir .. '" commit -m "' .. msg .. '" ' .. null)
+end
+
+---@param dir string
+---@return string
+local function headSha(dir)
+	local h = assert(io.popen('git -C "' .. dir .. '" rev-parse HEAD'))
+	local sha = h:read("*l")
+	h:close()
+	return sha
 end
 
 test.it("init creates a non-bare repo", function()
@@ -98,5 +122,54 @@ test.it("clone with branch checks out the right branch", function()
 	local dir = mkTmp("clone-branch") .. sep .. "repo"
 	local repo = git2.clone("https://github.com/lde-org/lde", dir, "master")
 	test.equal(repo:headUnborn(), false)
+	repo:free()
+end)
+
+test.it("version returns a semver string", function()
+	local v = git2.version()
+	test.truthy(v:match("^%d+%.%d+%.%d+$"))
+end)
+
+test.it("currentBranch returns the active branch name", function()
+	local dir = mkTmp("branch")
+	mkCommit(dir, "init")
+	local repo = git2.open(dir)
+	local branch = repo:currentBranch()
+	test.truthy(branch == "master" or branch == "main")
+	repo:free()
+end)
+
+test.it("remoteUrl returns the configured origin URL", function()
+	local src  = mkTmp("remurl-src")
+	mkCommit(src, "init")
+	local dest = mkTmp("remurl-dest") .. sep .. "repo"
+	os.execute('git clone "' .. src .. '" "' .. dest .. '" ' .. null)
+	local repo = git2.open(dest)
+	test.equal(repo:remoteUrl("origin"), src)
+	repo:free()
+end)
+
+test.it("checkout detaches HEAD to the requested SHA", function()
+	local dir = mkTmp("checkout")
+	mkCommit(dir, "first")
+	local first_sha = headSha(dir)
+	addCommit(dir, "f2", "second")
+	local repo = git2.open(dir)
+	test.equal(#repo:head(), 40) -- sanity: we're on second commit
+	repo:checkout(first_sha)
+	test.equal(repo:head(), first_sha)
+	repo:free()
+end)
+
+test.it("pull fetches origin and hard-resets to new upstream commit", function()
+	local src  = mkTmp("pull-src")
+	mkCommit(src, "init")
+	local dest = mkTmp("pull-dest") .. sep .. "repo"
+	os.execute('git clone "' .. src .. '" "' .. dest .. '" ' .. null)
+	addCommit(src, "f2", "second")
+	local second_sha = headSha(src)
+	local repo = git2.open(dest)
+	repo:pull()
+	test.equal(repo:head(), second_sha)
 	repo:free()
 end)

@@ -26,6 +26,7 @@ ffi.cdef [[
   /* opaque options structs — sized to match the ABI, initialized via _init */
   typedef struct { char _[376]; const char *checkout_branch; char _rest[32]; } git_clone_options;
   typedef struct { char _[376]; } git_submodule_update_options;
+  typedef struct { unsigned int version; unsigned int checkout_strategy; char _rest[136]; } git_checkout_options;
 
   const git_error *git_error_last(void);
   int  git_libgit2_init(void);
@@ -79,6 +80,17 @@ ffi.cdef [[
   int  git_remote_lookup(git_remote **out, git_repository *repo, const char *name);
   int  git_remote_fetch(git_remote *remote, const void *refspecs, void *opts, const char *reflog_message);
   void git_remote_free(git_remote *remote);
+  const char *git_remote_url(const git_remote *remote);
+
+  const char *git_reference_shorthand(const git_reference *ref);
+
+  int  git_checkout_options_init(git_checkout_options *opts, unsigned int version);
+  int  git_checkout_head(git_repository *repo, const git_checkout_options *opts);
+  int  git_repository_set_head_detached(git_repository *repo, const git_oid *commitish);
+
+  int  git_reset(git_repository *repo, const git_object *target, int reset_type, const git_checkout_options *checkout_opts);
+
+  void git_libgit2_version(int *major, int *minor, int *rev);
 ]]
 
 local here = debug.getinfo(1, "S").source:sub(2):match("(.*[/\\])") or ""
@@ -288,6 +300,47 @@ function Repo:updateSubmodules()
 	check(ret)
 end
 
+---@param name string
+---@return string
+function Repo:remoteUrl(name)
+	local rmt = ffi.new("git_remote*[1]")
+	check(lib.git_remote_lookup(rmt, self._repo, name))
+	local url = ffi.string(lib.git_remote_url(rmt[0]))
+	lib.git_remote_free(rmt[0])
+	return url
+end
+
+---@return string
+function Repo:currentBranch()
+	local ref = ffi.new("git_reference*[1]")
+	check(lib.git_repository_head(ref, self._repo))
+	local name = ffi.string(lib.git_reference_shorthand(ref[0]))
+	lib.git_reference_free(ref[0])
+	return name
+end
+
+---@param ref string
+function Repo:checkout(ref)
+	local op = ffi.new("git_object*[1]")
+	check(lib.git_revparse_single(op, self._repo, ref))
+	local oid = ffi.new("git_oid")
+	ffi.copy(oid, lib.git_object_id(op[0]), ffi.sizeof("git_oid"))
+	lib.git_object_free(op[0])
+	check(lib.git_repository_set_head_detached(self._repo, oid))
+	local opts = ffi.new("git_checkout_options")
+	check(lib.git_checkout_options_init(opts, 1))
+	opts.checkout_strategy = 1 -- GIT_CHECKOUT_SAFE
+	check(lib.git_checkout_head(self._repo, opts))
+end
+
+function Repo:pull()
+	self:fetch("origin")
+	local op = ffi.new("git_object*[1]")
+	check(lib.git_revparse_single(op, self._repo, "FETCH_HEAD"))
+	check(lib.git_reset(self._repo, op[0], 3, nil)) -- GIT_RESET_HARD
+	lib.git_object_free(op[0])
+end
+
 function Repo:free()
 	lib.git_repository_free(self._repo)
 end
@@ -329,6 +382,15 @@ function git2.clone(url, path, branch)
 	end
 	check(lib.git_clone(rp, url, path, opts))
 	return Repo.new(rp[0])
+end
+
+---@return string
+function git2.version()
+	local major = ffi.new("int[1]")
+	local minor = ffi.new("int[1]")
+	local rev   = ffi.new("int[1]")
+	lib.git_libgit2_version(major, minor, rev)
+	return major[0] .. "." .. minor[0] .. "." .. rev[0]
 end
 
 -- Call git_libgit2_shutdown when the module is GC'd to avoid a segfault on DLL unload.
