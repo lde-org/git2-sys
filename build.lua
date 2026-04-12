@@ -2,6 +2,7 @@ local outDir = os.getenv("LDE_OUTPUT_DIR")
 local sep = string.sub(package.config, 1, 1)
 local isWindows = jit.os == "Windows"
 local isMac = jit.os == "OSX"
+local isAndroid = os.getenv("ANDROID_ROOT") ~= nil
 local scriptDir = debug.getinfo(1, "S").source:sub(2):match("(.*[/\\])")
 local src = scriptDir .. "vendor" .. sep .. "libgit2"
 local libName = isWindows and "git2.dll" or (isMac and "libgit2.dylib" or "libgit2.so")
@@ -18,7 +19,11 @@ local build = src .. sep .. "build"
 local https = isWindows and "WinHTTP" or "OpenSSL"
 local cmakeExtra = ""
 
-if isMac then
+if isAndroid and os.getenv("ANDROID_NDK_ROOT") then
+	local ndkRoot = os.getenv("ANDROID_NDK_ROOT")
+	local toolchain = ndkRoot .. "/build/cmake/android.toolchain.cmake"
+	cmakeExtra = ' -DCMAKE_TOOLCHAIN_FILE="' .. toolchain .. '" -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24'
+elseif isMac then
 	local f = io.popen("brew --prefix openssl")
 	if f then
 		local prefix = f:read("*l"); f:close()
