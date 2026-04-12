@@ -24,7 +24,7 @@ ffi.cdef [[
   typedef struct { const char *message; int klass; } git_error;
 
   /* opaque options structs — sized to match the ABI, initialized via _init */
-  typedef struct { char _[416]; } git_clone_options;
+  typedef struct { char _[376]; const char *checkout_branch; char _rest[32]; } git_clone_options;
   typedef struct { char _[376]; } git_submodule_update_options;
 
   const git_error *git_error_last(void);
@@ -315,9 +315,7 @@ function git2.clone(url, path, branch)
 	if branch then
 		local o = ffi.new("git_clone_options")
 		lib.git_clone_options_init(o, 1)
-		-- checkout_branch is a const char* at offset 376; cast to set it
-		local ptr = ffi.cast("const char**", ffi.cast("char*", o) + 376)
-		ptr[0] = branch
+		o.checkout_branch = branch
 		opts = o
 	end
 	check(lib.git_clone(rp, url, path, opts))
