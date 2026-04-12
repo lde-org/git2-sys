@@ -16,7 +16,6 @@ local function exec(cmd)
 end
 
 local build = src .. sep .. "build"
-local ndkRoot = os.getenv("ANDROID_NDK_ROOT")
 
 ---@format disable-next
 local gitMin = "-DBUILD_TESTS=OFF -DBUILD_CLI=OFF -DUSE_SSH=OFF -DUSE_GSSAPI=OFF -DUSE_NTLMCLIENT=OFF -DREGEX_BACKEND=builtin -DUSE_HTTP_PARSER=builtin -DCMAKE_C_FLAGS=-g0"
@@ -28,17 +27,6 @@ if isWindows then
 elseif isMac then
 	https = "SecureTransport"
 	cmakeExtra = ""
-elseif isAndroid and ndkRoot then
-	https = "mbedTLS"
-	local mbedSrc = scriptDir .. "vendor" .. sep .. "mbedtls"
-	local mbedBuild = mbedSrc .. sep .. "build"
-	local mbedOut = mbedSrc .. sep .. "install"
-	local toolchain = ndkRoot .. "/build/cmake/android.toolchain.cmake"
-	local androidFlags = '-DCMAKE_TOOLCHAIN_FILE="' .. toolchain .. '" -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24'
-	exec('cmake -S "' .. mbedSrc .. '" -B "' .. mbedBuild .. '" ' .. androidFlags .. ' -DCMAKE_INSTALL_PREFIX="' .. mbedOut .. '" -DENABLE_TESTING=OFF -DENABLE_PROGRAMS=OFF -DUSE_SHARED_MBEDTLS_LIBRARY=OFF')
-	exec('cmake --build "' .. mbedBuild .. '" -j$(nproc)')
-	exec('cmake --install "' .. mbedBuild .. '"')
-	cmakeExtra = androidFlags .. ' -DMBEDTLS_ROOT_DIR="' .. mbedOut .. '"'
 else
 	https = "OpenSSL"
 	cmakeExtra = ""
@@ -54,6 +42,5 @@ elseif isMac then
 	exec('strip -x "' .. outLib .. '"')
 else
 	exec('cp "' .. build .. '/libgit2.so" "' .. outLib .. '"')
-	local strip = (isAndroid and ndkRoot) and (ndkRoot .. "/toolchains/llvm/prebuilt/linux-aarch64/bin/llvm-strip") or "strip"
-	exec(strip .. ' --strip-unneeded --remove-section=.eh_frame --remove-section=.eh_frame_hdr "' .. outLib .. '"')
+	exec('strip --strip-unneeded --remove-section=.eh_frame --remove-section=.eh_frame_hdr "' .. outLib .. '"')
 end
