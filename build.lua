@@ -16,31 +16,37 @@ local function exec(cmd)
 end
 
 local build = src .. sep .. "build"
-local https = isWindows and "WinHTTP" or "OpenSSL"
 local ndkRoot = os.getenv("ANDROID_NDK_ROOT")
-local cmakeExtra = ""
 
 ---@format disable-next
 local gitMin = "-DBUILD_TESTS=OFF -DBUILD_CLI=OFF -DUSE_SSH=OFF -DUSE_GSSAPI=OFF -DUSE_NTLMCLIENT=OFF -DREGEX_BACKEND=builtin -DUSE_HTTP_PARSER=builtin -DCMAKE_C_FLAGS=-g0"
 
-if isAndroid and ndkRoot then
-	local toolchain = ndkRoot .. "/build/cmake/android.toolchain.cmake"
-	cmakeExtra = ' -DCMAKE_TOOLCHAIN_FILE="' .. toolchain .. '" -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24'
+local https, cmakeExtra
+if isWindows then
+	https = "WinHTTP"
+	cmakeExtra = ""
 elseif isMac then
-	local f = io.popen("brew --prefix openssl")
-	if f then
-		local prefix = f:read("*l"); f:close()
-		if prefix and prefix ~= "" then
-			cmakeExtra = ' -DOPENSSL_ROOT_DIR="' .. prefix .. '"'
-		end
-	end
+	https = "SecureTransport"
+	cmakeExtra = ""
+elseif isAndroid and ndkRoot then
+	https = "mbedTLS"
+	local mbedSrc = scriptDir .. "vendor" .. sep .. "mbedtls"
+	local mbedBuild = mbedSrc .. sep .. "build"
+	local mbedOut = mbedSrc .. sep .. "install"
+	local toolchain = ndkRoot .. "/build/cmake/android.toolchain.cmake"
+	local androidFlags = '-DCMAKE_TOOLCHAIN_FILE="' .. toolchain .. '" -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24'
+	exec('cmake -S "' .. mbedSrc .. '" -B "' .. mbedBuild .. '" ' .. androidFlags .. ' -DCMAKE_INSTALL_PREFIX="' .. mbedOut .. '" -DENABLE_TESTING=OFF -DENABLE_PROGRAMS=OFF -DUSE_SHARED_MBEDTLS_LIBRARY=OFF')
+	exec('cmake --build "' .. mbedBuild .. '" -j$(nproc)')
+	exec('cmake --install "' .. mbedBuild .. '"')
+	cmakeExtra = androidFlags .. ' -DMBEDTLS_ROOT_DIR="' .. mbedOut .. '"'
+else
+	https = "OpenSSL"
+	cmakeExtra = ""
 end
 
----@format disable-next
-exec('cmake -S "' .. src .. '" -B "' .. build .. '" -DBUILD_SHARED_LIBS=ON -DUSE_HTTPS=' .. https .. ' ' .. gitMin .. cmakeExtra)
+exec('cmake -S "' .. src .. '" -B "' .. build .. '" -DBUILD_SHARED_LIBS=ON -DUSE_HTTPS=' .. https .. ' ' .. gitMin .. (cmakeExtra ~= "" and (' ' .. cmakeExtra) or ""))
 exec('cmake --build "' .. build .. '" --config Release' .. (isWindows and "" or " -j$(nproc)"))
 
----@format disable-next
 if isWindows then
 	exec('copy "' .. build .. '\\Release\\git2.dll" "' .. outLib .. '"')
 elseif isMac then
