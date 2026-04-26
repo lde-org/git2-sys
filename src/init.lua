@@ -220,7 +220,7 @@ Repo.__index = Repo
 
 ---@param repo git2.ffi.Repository
 function Repo.new(repo)
-	return setmetatable({ _repo = repo }, Repo)
+	return setmetatable({ _repo = ffi.gc(repo, lib.git_repository_free) }, Repo)
 end
 
 function Repo:path()
@@ -431,7 +431,7 @@ function Repo:pull()
 end
 
 function Repo:free()
-	lib.git_repository_free(self._repo)
+	lib.git_repository_free(ffi.gc(self._repo, nil))
 end
 
 -- module
