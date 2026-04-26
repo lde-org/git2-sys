@@ -220,6 +220,7 @@ CommitMeta.__index = function(self, key)
 	local c = rawget(self, "_c")
 	local val
 
+	---@format disable-next
 	if     key == "id"        then val = oidStr(lib.git_commit_id(c))
 	elseif key == "message"   then val = ffi.string(lib.git_commit_message(c))
 	elseif key == "summary"   then val = ffi.string(lib.git_commit_summary(c))
@@ -245,6 +246,19 @@ end
 
 -- Repo class
 
+local state = {
+	alive = true,
+	repos = setmetatable({}, { __mode = "k" })
+}
+
+local function freeRepo(self)
+	local repo = self._repo
+	if repo == nil then return end
+	self._repo = nil
+	state.repos[self] = nil
+	lib.git_repository_free(ffi.gc(repo, nil))
+end
+
 ---@class git2.Repo
 ---@field _repo git2.ffi.Repository
 local Repo = {}
@@ -252,7 +266,16 @@ Repo.__index = Repo
 
 ---@param repo git2.ffi.Repository
 function Repo.new(repo)
-	return setmetatable({ _repo = ffi.gc(repo, lib.git_repository_free) }, Repo)
+	local self = setmetatable({
+		_repo = ffi.gc(repo, function(p)
+			if state.alive then
+				lib.git_repository_free(p)
+			end
+		end),
+		_state = state
+	}, Repo)
+	state.repos[self] = true
+	return self
 end
 
 function Repo:path()
@@ -473,7 +496,7 @@ function Repo:pull()
 end
 
 function Repo:free()
-	lib.git_repository_free(ffi.gc(self._repo, nil))
+	freeRepo(self)
 end
 
 -- module
@@ -513,7 +536,7 @@ function git2.clone(url, path, branch, depth)
 		local o = CloneOptions()
 		lib.git_clone_options_init(o, 1)
 		if branch then o.checkout_branch = branch end
-		if depth  then o.fetch_opts.depth = depth end
+		if depth then o.fetch_opts.depth = depth end
 		opts = o
 	end
 
@@ -531,7 +554,13 @@ function git2.version()
 	return major[0] .. "." .. minor[0] .. "." .. rev[0]
 end
 
--- keeps `lib` alive so it outlives the shutdown callback
-git2._gc = ffi.gc(ffi.new("char[1]"), function() lib.git_libgit2_shutdown() end)
+git2._gc = ffi.gc(ffi.new("char[1]"), function()
+	for repo in pairs(state.repos) do
+		freeRepo(repo)
+	end
+
+	state.alive = false
+	lib.git_libgit2_shutdown()
+end)
 
 return git2
