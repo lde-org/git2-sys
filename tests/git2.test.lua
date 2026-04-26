@@ -173,3 +173,50 @@ test.it("pull fetches origin and hard-resets to new upstream commit", function()
 	test.equal(repo:head(), second_sha)
 	repo:free()
 end)
+
+local function commitCount(dir)
+	local h = assert(io.popen('git -C "' .. dir .. '" rev-list --count HEAD'))
+	local n = tonumber(h:read("*l"))
+	h:close()
+	return n
+end
+
+-- NOTE: requires network access
+test.it("clone with depth=1 produces a shallow clone", function()
+	local dir = mkTmp("shallow-clone") .. sep .. "repo"
+	local repo = git2.clone("https://github.com/lde-org/lde", dir, nil, 1)
+	test.truthy(repo:workdir())
+	test.equal(commitCount(dir), 1)
+	repo:free()
+end)
+
+-- NOTE: requires network access
+test.it("clone with depth and branch is shallow", function()
+	local dir = mkTmp("shallow-branch") .. sep .. "repo"
+	local repo = git2.clone("https://github.com/lde-org/lde", dir, "master", 1)
+	test.equal(repo:headUnborn(), false)
+	test.equal(commitCount(dir), 1)
+	repo:free()
+end)
+
+-- NOTE: requires network access
+test.it("fetch with depth=1 performs a shallow fetch", function()
+	local dir = mkTmp("shallow-fetch") .. sep .. "repo"
+	os.execute('git clone --depth 1 "https://github.com/lde-org/lde" "' .. dir .. '" ' .. null)
+	local repo = git2.open(dir)
+	local ok, err = repo:fetch("origin", 1)
+	test.truthy(ok, err)
+	repo:free()
+end)
+
+-- NOTE: requires network access
+test.it("updateSubmodules with depth=1 clones submodules shallowly", function()
+	local dir = mkTmp("shallow-sub") .. sep .. "repo"
+	-- clone without submodules so updateSubmodules has work to do
+	os.execute('git clone "https://github.com/lde-org/git2-sys" "' .. dir .. '" ' .. null)
+	local repo = git2.open(dir)
+	local ok, err = repo:updateSubmodules(1)
+	test.truthy(ok, err)
+	test.equal(commitCount(dir .. sep .. "vendor" .. sep .. "libgit2"), 1)
+	repo:free()
+end)

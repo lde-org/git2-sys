@@ -23,15 +23,53 @@ ffi.cdef [[
   typedef struct { unsigned char id[20]; } git_oid;
   typedef struct { const char *message; int klass; } git_error;
 
-  /* opaque options structs — sized to match the ABI, initialized via _init */
-  typedef struct { char _[376]; const char *checkout_branch; char _rest[32]; } git_clone_options;
-  typedef struct { char _[376]; } git_submodule_update_options;
   typedef struct { unsigned int version; unsigned int checkout_strategy; char _rest[136]; } git_checkout_options;
+
+  /* git_fetch_options — layout verified against libgit2 headers on 64-bit.
+     Opaque padding hides git_remote_callbacks (128 B) and git_proxy_options
+     (40 B); only `depth` is exposed (GIT_FETCH_DEPTH_FULL=0, shallow=1+). */
+  typedef struct {
+    int version;
+    char _pad0[4];
+    char _callbacks[128];
+    int prune;
+    unsigned int update_fetchhead;
+    int download_tags;
+    char _pad1[4];
+    char _proxy[40];
+    int depth;
+    char _rest[20];
+  } git_fetch_options;
+
+  /* git_clone_options — fetch_opts embedded at offset 152, checkout_branch
+     at offset 376 (matches the former opaque char _[376] + pointer layout). */
+  typedef struct {
+    unsigned int version;
+    char _pad0[4];
+    char _checkout_opts[144];
+    git_fetch_options fetch_opts;
+    int bare;
+    int local;
+    const char *checkout_branch;
+    char _rest[32];
+  } git_clone_options;
+
+  /* git_submodule_update_options — fetch_opts embedded at offset 152;
+     explicit trailing _pad1 keeps sizeof at 376 to match the C ABI. */
+  typedef struct {
+    unsigned int version;
+    char _pad0[4];
+    char _checkout_opts[144];
+    git_fetch_options fetch_opts;
+    int allow_fetch;
+    char _pad1[4];
+  } git_submodule_update_options;
 
   const git_error *git_error_last(void);
   int  git_libgit2_init(void);
   int  git_libgit2_shutdown(void);
 
+  int  git_fetch_options_init(git_fetch_options *opts, unsigned int version);
   int  git_clone_options_init(git_clone_options *opts, unsigned int version);
   int  git_clone(git_repository **out, const char *url, const char *local_path, const git_clone_options *options);
 
@@ -78,7 +116,7 @@ ffi.cdef [[
   const git_oid *git_object_id(const git_object *obj);
 
   int  git_remote_lookup(git_remote **out, git_repository *repo, const char *name);
-  int  git_remote_fetch(git_remote *remote, const void *refspecs, void *opts, const char *reflog_message);
+  int  git_remote_fetch(git_remote *remote, const void *refspecs, const git_fetch_options *opts, const char *reflog_message);
   void git_remote_free(git_remote *remote);
   const char *git_remote_url(const git_remote *remote);
 
@@ -140,6 +178,8 @@ local IndexPtr = ffi.typeof("git_index*[1]")
 local RemotePtr = ffi.typeof("git_remote*[1]")
 ---@type fun(): ffi.cdata*
 local CheckoutOptions = ffi.typeof("git_checkout_options")
+---@type fun(): ffi.cdata*
+local FetchOptions = ffi.typeof("git_fetch_options")
 ---@type fun(): ffi.cdata*
 local CloneOptions = ffi.typeof("git_clone_options")
 ---@type fun(): ffi.cdata*
@@ -333,23 +373,33 @@ function Repo:indexWriteTree()
 end
 
 ---@param remoteName string
+---@param depth integer? 1 for shallow, nil for full history
 ---@return true?, string?
-function Repo:fetch(remoteName)
+function Repo:fetch(remoteName, depth)
 	local rmt = RemotePtr()
 	local code = lib.git_remote_lookup(rmt, self._repo, remoteName)
 	if code ~= 0 then return nil, git_err() end
 
-	code = lib.git_remote_fetch(rmt[0], nil, nil, nil)
+	local fopts = nil
+	if depth then
+		fopts = FetchOptions()
+		lib.git_fetch_options_init(fopts, 1)
+		fopts.depth = depth
+	end
+
+	code = lib.git_remote_fetch(rmt[0], nil, fopts, nil)
 	lib.git_remote_free(rmt[0])
 	if code ~= 0 then return nil, git_err() end
 
 	return true
 end
 
+---@param depth integer? 1 for shallow submodule fetch, nil for full history
 ---@return true?, string?
-function Repo:updateSubmodules()
+function Repo:updateSubmodules(depth)
 	local opts = SubmoduleUpdateOptions()
 	lib.git_submodule_update_options_init(opts, 1)
+	if depth then opts.fetch_opts.depth = depth end
 
 	local sub_err
 	local cb = ffi.cast("int (*)(git_submodule*, const char*, void*)", function(sm)
@@ -461,15 +511,17 @@ end
 ---@param url string
 ---@param path string
 ---@param branch string?
+---@param depth integer? 1 for shallow clone, nil for full history
 ---@return git2.Repo?, string?
-function git2.clone(url, path, branch)
+function git2.clone(url, path, branch, depth)
 	local rp = RepositoryPtr()
 	local opts = nil
 
-	if branch then
+	if branch or depth then
 		local o = CloneOptions()
 		lib.git_clone_options_init(o, 1)
-		o.checkout_branch = branch
+		if branch then o.checkout_branch = branch end
+		if depth  then o.fetch_opts.depth = depth end
 		opts = o
 	end
 
