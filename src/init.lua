@@ -134,14 +134,6 @@ ffi.cdef [[
 local here = debug.getinfo(1, "S").source:sub(2):match("(.*[/\\])") or ""
 local libName = jit.os == "Windows" and "git2.dll" or (jit.os == "OSX" and "libgit2.dylib" or "libgit2.so")
 
--- On Android/Bionic, OpenSSL's atexit cleanup crashes if libgit2.so has been
--- dlclose'd (it holds callbacks into it). Pre-open with RTLD_NODELETE so the
--- library stays mapped through process teardown even after ffi's dlclose.
-if os.getenv("ANDROID_ROOT") then
-	ffi.cdef [[ void *dlopen(const char *filename, int flags); ]]
-	ffi.C.dlopen(here .. libName, 0x2 + 0x1000) -- RTLD_NOW | RTLD_NODELETE
-end
-
 local lib = ffi.load(here .. libName)
 lib.git_libgit2_init()
 
