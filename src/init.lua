@@ -129,6 +129,9 @@ ffi.cdef [[
   int  git_reset(git_repository *repo, const git_object *target, int reset_type, const git_checkout_options *checkout_opts);
 
   void git_libgit2_version(int *major, int *minor, int *rev);
+
+  typedef struct { git_commit     *ptr; } git2_commit_t;
+  typedef struct { git_repository *ptr; } git2_repo_t;
 ]]
 
 local here = debug.getinfo(1, "S").source:sub(2):match("(.*[/\\])") or ""
@@ -204,14 +207,12 @@ local function wrapSig(sig)
 end
 
 local state = {
-	alive   = true,
-	repos   = setmetatable({}, { __mode = "k" }),
-	commits = setmetatable({}, { __mode = "k" })
+	alive = true
 }
 
--- Commit class — fields resolved lazily and cached on first access
+-- Commit — ffi object wrapping git_commit*
 
----@class git2.Commit
+---@class git2.Commit: ffi.cdata*
 ---@field id string
 ---@field message string
 ---@field summary string
@@ -219,106 +220,69 @@ local state = {
 ---@field committer git2.Sig
 ---@field time integer
 ---@field parents string[]
-local Commit = {}
 
-local CommitMeta = {}
-CommitMeta.__index = function(self, key)
-	local c = rawget(self, "_c")
-	local val
-
-	---@format disable-next
-	if     key == "id"        then val = oidStr(lib.git_commit_id(c))
-	elseif key == "message"   then val = ffi.string(lib.git_commit_message(c))
-	elseif key == "summary"   then val = ffi.string(lib.git_commit_summary(c))
-	elseif key == "author"    then val = wrapSig(lib.git_commit_author(c))
-	elseif key == "committer" then val = wrapSig(lib.git_commit_committer(c))
-	elseif key == "time"      then val = tonumber(lib.git_commit_time(c))
-	elseif key == "parents"   then
-		local parents = {}
-		for i = 0, tonumber(lib.git_commit_parentcount(c)) - 1 do
-			parents[i + 1] = oidStr(lib.git_commit_parent_id(c, i))
+local Commit = ffi.metatype("git2_commit_t", {
+	__index = function(self, key)
+		local c = self.ptr
+		---@format disable-next
+		if     key == "id"        then return oidStr(lib.git_commit_id(c))
+		elseif key == "message"   then return ffi.string(lib.git_commit_message(c))
+		elseif key == "summary"   then return ffi.string(lib.git_commit_summary(c))
+		elseif key == "author"    then return wrapSig(lib.git_commit_author(c))
+		elseif key == "committer" then return wrapSig(lib.git_commit_committer(c))
+		elseif key == "time"      then return tonumber(lib.git_commit_time(c))
+		elseif key == "parents"   then
+			local parents = {}
+			for i = 0, tonumber(lib.git_commit_parentcount(c)) - 1 do
+				parents[i + 1] = oidStr(lib.git_commit_parent_id(c, i))
+			end
+			return parents
 		end
-		val = parents
-	end
+	end,
+	__gc = function(self)
+		if state.alive and self.ptr ~= nil then
+			lib.git_commit_free(self.ptr)
+			self.ptr = nil
+		end
+	end,
+})
 
-	if val ~= nil then rawset(self, key, val) end
-	return val
+-- Repo — ffi object wrapping git_repository*
+
+---@class git2.Repo: ffi.cdata*
+local RepoMethods = {}
+
+local Repo = ffi.metatype("git2_repo_t", {
+	__index = RepoMethods,
+	__gc = function(self)
+		if state.alive and self.ptr ~= nil then
+			lib.git_repository_free(self.ptr)
+			self.ptr = nil
+		end
+	end,
+})
+
+function RepoMethods:path()
+	return ffi.string(lib.git_repository_path(self.ptr))
 end
 
----@param self git2.Commit
-local function freeCommit(self)
-	local c = self._c
-	if c == nil then return end
-	self._c = nil
-	state.commits[self] = nil
-	lib.git_commit_free(ffi.gc(c, nil))
-end
-
----@param c git2.ffi.Commit
-function Commit.new(c)
-	local self = setmetatable({
-		_c = ffi.gc(c, function(p)
-			if state.alive then
-				lib.git_commit_free(p)
-			end
-		end),
-		_state = state
-	}, CommitMeta)
-	state.commits[self] = true
-	return self
-end
-
--- Repo class
-
----@param self git2.Repo
-local function freeRepo(self)
-	local repo = self._repo
-	if repo == nil then return end
-	self._repo = nil
-	state.repos[self] = nil
-	lib.git_repository_free(ffi.gc(repo, nil))
-end
-
----@class git2.Repo
----@field _repo git2.ffi.Repository
-local Repo = {}
-Repo.__index = Repo
-
----@param repo git2.ffi.Repository
-function Repo.new(repo)
-	local self = setmetatable({
-		_repo = ffi.gc(repo, function(p)
-			if state.alive then
-				lib.git_repository_free(p)
-			end
-		end),
-		_state = state
-	}, Repo)
-	state.repos[self] = true
-	return self
-end
-
-function Repo:path()
-	return ffi.string(lib.git_repository_path(self._repo))
-end
-
-function Repo:workdir()
-	local p = lib.git_repository_workdir(self._repo)
+function RepoMethods:workdir()
+	local p = lib.git_repository_workdir(self.ptr)
 	return p ~= nil and ffi.string(p) or nil
 end
 
-function Repo:isBare()
-	return lib.git_repository_is_bare(self._repo) == 1
+function RepoMethods:isBare()
+	return lib.git_repository_is_bare(self.ptr) == 1
 end
 
-function Repo:headUnborn()
-	return lib.git_repository_head_unborn(self._repo) == 1
+function RepoMethods:headUnborn()
+	return lib.git_repository_head_unborn(self.ptr) == 1
 end
 
 ---@return string?, string?
-function Repo:head()
+function RepoMethods:head()
 	local ref = ReferencePtr()
-	local code = lib.git_repository_head(ref, self._repo)
+	local code = lib.git_repository_head(ref, self.ptr)
 	if code ~= 0 then return nil, git_err() end
 
 	local sha = oidStr(lib.git_reference_target(ref[0]))
@@ -328,23 +292,23 @@ end
 
 ---@param sha string
 ---@return git2.Commit?, string?
-function Repo:commitLookup(sha)
+function RepoMethods:commitLookup(sha)
 	local oid = Oid()
 	local code = lib.git_oid_fromstr(oid, sha)
 	if code ~= 0 then return nil, git_err() end
 
 	local cp = CommitPtr()
-	code = lib.git_commit_lookup(cp, self._repo, oid)
+	code = lib.git_commit_lookup(cp, self.ptr, oid)
 	if code ~= 0 then return nil, git_err() end
 
-	return Commit.new(cp[0])
+	return Commit(cp[0])
 end
 
 ---@param spec string
 ---@return string?, string?
-function Repo:revparse(spec)
+function RepoMethods:revparse(spec)
 	local op = ObjectPtr()
-	local code = lib.git_revparse_single(op, self._repo, spec)
+	local code = lib.git_revparse_single(op, self.ptr, spec)
 	if code ~= 0 then return nil, git_err() end
 
 	local sha = oidStr(lib.git_object_id(op[0]))
@@ -354,9 +318,9 @@ end
 
 ---@param relpath string
 ---@return true?, string?
-function Repo:indexAdd(relpath)
+function RepoMethods:indexAdd(relpath)
 	local ip = IndexPtr()
-	local code = lib.git_repository_index(ip, self._repo)
+	local code = lib.git_repository_index(ip, self.ptr)
 	if code ~= 0 then return nil, git_err() end
 
 	code = lib.git_index_add_bypath(ip[0], relpath)
@@ -368,9 +332,9 @@ end
 
 ---@param relpath string
 ---@return true?, string?
-function Repo:indexRemove(relpath)
+function RepoMethods:indexRemove(relpath)
 	local ip = IndexPtr()
-	local code = lib.git_repository_index(ip, self._repo)
+	local code = lib.git_repository_index(ip, self.ptr)
 	if code ~= 0 then return nil, git_err() end
 
 	code = lib.git_index_remove_bypath(ip[0], relpath)
@@ -381,9 +345,9 @@ function Repo:indexRemove(relpath)
 end
 
 ---@return true?, string?
-function Repo:indexWrite()
+function RepoMethods:indexWrite()
 	local ip = IndexPtr()
-	local code = lib.git_repository_index(ip, self._repo)
+	local code = lib.git_repository_index(ip, self.ptr)
 	if code ~= 0 then return nil, git_err() end
 
 	code = lib.git_index_write(ip[0])
@@ -394,9 +358,9 @@ function Repo:indexWrite()
 end
 
 ---@return string?, string?
-function Repo:indexWriteTree()
+function RepoMethods:indexWriteTree()
 	local ip = IndexPtr()
-	local code = lib.git_repository_index(ip, self._repo)
+	local code = lib.git_repository_index(ip, self.ptr)
 	if code ~= 0 then return nil, git_err() end
 
 	local oid = Oid()
@@ -410,9 +374,9 @@ end
 ---@param remoteName string
 ---@param depth integer? 1 for shallow, nil for full history
 ---@return true?, string?
-function Repo:fetch(remoteName, depth)
+function RepoMethods:fetch(remoteName, depth)
 	local rmt = RemotePtr()
-	local code = lib.git_remote_lookup(rmt, self._repo, remoteName)
+	local code = lib.git_remote_lookup(rmt, self.ptr, remoteName)
 	if code ~= 0 then return nil, git_err() end
 
 	local fopts = nil
@@ -431,7 +395,7 @@ end
 
 ---@param depth integer? 1 for shallow submodule fetch, nil for full history
 ---@return true?, string?
-function Repo:updateSubmodules(depth)
+function RepoMethods:updateSubmodules(depth)
 	local opts = SubmoduleUpdateOptions()
 	lib.git_submodule_update_options_init(opts, 1)
 	if depth then opts.fetch_opts.depth = depth end
@@ -443,7 +407,7 @@ function Repo:updateSubmodules(depth)
 		return 0
 	end)
 
-	local code = lib.git_submodule_foreach(self._repo, cb, nil)
+	local code = lib.git_submodule_foreach(self.ptr, cb, nil)
 	cb:free()
 
 	if code ~= 0 then return nil, git_err() end
@@ -453,9 +417,9 @@ end
 
 ---@param name string
 ---@return string?, string?
-function Repo:remoteUrl(name)
+function RepoMethods:remoteUrl(name)
 	local rmt = RemotePtr()
-	local code = lib.git_remote_lookup(rmt, self._repo, name)
+	local code = lib.git_remote_lookup(rmt, self.ptr, name)
 	if code ~= 0 then return nil, git_err() end
 
 	local url = ffi.string(lib.git_remote_url(rmt[0]))
@@ -464,9 +428,9 @@ function Repo:remoteUrl(name)
 end
 
 ---@return string?, string?
-function Repo:currentBranch()
+function RepoMethods:currentBranch()
 	local ref = ReferencePtr()
-	local code = lib.git_repository_head(ref, self._repo)
+	local code = lib.git_repository_head(ref, self.ptr)
 	if code ~= 0 then return nil, git_err() end
 
 	local name = ffi.string(lib.git_reference_shorthand(ref[0]))
@@ -476,16 +440,16 @@ end
 
 ---@param ref string
 ---@return true?, string?
-function Repo:checkout(ref)
+function RepoMethods:checkout(ref)
 	local op = ObjectPtr()
-	local code = lib.git_revparse_single(op, self._repo, ref)
+	local code = lib.git_revparse_single(op, self.ptr, ref)
 	if code ~= 0 then return nil, git_err() end
 
 	local oid = Oid()
 	ffi.copy(oid, lib.git_object_id(op[0]), ffi.sizeof("git_oid"))
 	lib.git_object_free(op[0])
 
-	code = lib.git_repository_set_head_detached(self._repo, oid)
+	code = lib.git_repository_set_head_detached(self.ptr, oid)
 	if code ~= 0 then return nil, git_err() end
 
 	local opts = CheckoutOptions()
@@ -493,30 +457,33 @@ function Repo:checkout(ref)
 	if code ~= 0 then return nil, git_err() end
 	opts.checkout_strategy = 1 -- GIT_CHECKOUT_SAFE
 
-	code = lib.git_checkout_head(self._repo, opts)
+	code = lib.git_checkout_head(self.ptr, opts)
 	if code ~= 0 then return nil, git_err() end
 
 	return true
 end
 
 ---@return true?, string?
-function Repo:pull()
+function RepoMethods:pull()
 	local ok, err = self:fetch("origin")
 	if not ok then return nil, err end
 
 	local op = ObjectPtr()
-	local code = lib.git_revparse_single(op, self._repo, "FETCH_HEAD")
+	local code = lib.git_revparse_single(op, self.ptr, "FETCH_HEAD")
 	if code ~= 0 then return nil, git_err() end
 
-	code = lib.git_reset(self._repo, op[0], 3, nil) -- GIT_RESET_HARD
+	code = lib.git_reset(self.ptr, op[0], 3, nil) -- GIT_RESET_HARD
 	lib.git_object_free(op[0])
 	if code ~= 0 then return nil, git_err() end
 
 	return true
 end
 
-function Repo:free()
-	freeRepo(self)
+function RepoMethods:free()
+	if self.ptr ~= nil then
+		lib.git_repository_free(self.ptr)
+		self.ptr = nil
+	end
 end
 
 -- module
@@ -530,7 +497,7 @@ function git2.open(path)
 	local rp = RepositoryPtr()
 	local code = lib.git_repository_open(rp, path)
 	if code ~= 0 then return nil, git_err() end
-	return Repo.new(rp[0])
+	return Repo(rp[0])
 end
 
 ---@param path string
@@ -540,7 +507,7 @@ function git2.init(path, bare)
 	local rp = RepositoryPtr()
 	local code = lib.git_repository_init(rp, path, bare and 1 or 0)
 	if code ~= 0 then return nil, git_err() end
-	return Repo.new(rp[0])
+	return Repo(rp[0])
 end
 
 ---@param url string
@@ -562,7 +529,7 @@ function git2.clone(url, path, branch, depth)
 
 	local code = lib.git_clone(rp, url, path, opts)
 	if code ~= 0 then return nil, git_err() end
-	return Repo.new(rp[0])
+	return Repo(rp[0])
 end
 
 ---@return string
@@ -575,8 +542,6 @@ function git2.version()
 end
 
 git2._gc = ffi.gc(ffi.new("char[1]"), function()
-	for commit in pairs(state.commits) do freeCommit(commit) end
-	for repo in pairs(state.repos) do freeRepo(repo) end
 	state.alive = false
 	lib.git_libgit2_shutdown()
 end)
