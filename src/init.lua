@@ -239,18 +239,38 @@ CommitMeta.__index = function(self, key)
 	return val
 end
 
+---@param self git2.Commit
+local function freeCommit(self)
+	local c = self._c
+	if c == nil then return end
+	self._c = nil
+	state.commits[self] = nil
+	lib.git_commit_free(ffi.gc(c, nil))
+end
+
 ---@param c git2.ffi.Commit
 function Commit.new(c)
-	return setmetatable({ _c = ffi.gc(c, lib.git_commit_free) }, CommitMeta)
+	local self = setmetatable({
+		_c = ffi.gc(c, function(p)
+			if state.alive then
+				lib.git_commit_free(p)
+			end
+		end),
+		_state = state
+	}, CommitMeta)
+	state.commits[self] = true
+	return self
 end
 
 -- Repo class
 
 local state = {
-	alive = true,
-	repos = setmetatable({}, { __mode = "k" })
+	alive   = true,
+	repos   = setmetatable({}, { __mode = "k" }),
+	commits = setmetatable({}, { __mode = "k" })
 }
 
+---@param self git2.Repo
 local function freeRepo(self)
 	local repo = self._repo
 	if repo == nil then return end
@@ -555,10 +575,8 @@ function git2.version()
 end
 
 git2._gc = ffi.gc(ffi.new("char[1]"), function()
-	for repo in pairs(state.repos) do
-		freeRepo(repo)
-	end
-
+	for commit in pairs(state.commits) do freeCommit(commit) end
+	for repo in pairs(state.repos) do freeRepo(repo) end
 	state.alive = false
 	lib.git_libgit2_shutdown()
 end)
