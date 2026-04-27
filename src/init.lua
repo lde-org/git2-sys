@@ -203,6 +203,12 @@ local function wrapSig(sig)
 	return { name = ffi.string(sig.name), email = ffi.string(sig.email), time = tonumber(sig.when.time) }
 end
 
+local state = {
+	alive   = true,
+	repos   = setmetatable({}, { __mode = "k" }),
+	commits = setmetatable({}, { __mode = "k" })
+}
+
 -- Commit class — fields resolved lazily and cached on first access
 
 ---@class git2.Commit
@@ -263,12 +269,6 @@ function Commit.new(c)
 end
 
 -- Repo class
-
-local state = {
-	alive   = true,
-	repos   = setmetatable({}, { __mode = "k" }),
-	commits = setmetatable({}, { __mode = "k" })
-}
 
 ---@param self git2.Repo
 local function freeRepo(self)
