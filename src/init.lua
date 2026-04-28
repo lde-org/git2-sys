@@ -138,6 +138,18 @@ ffi.cdef [[
   int  git_remote_fetch(git_remote *remote, const void *refspecs, const git_fetch_options *opts, const char *reflog_message);
   void git_remote_free(git_remote *remote);
   const char *git_remote_url(const git_remote *remote);
+  int  git_remote_create_detached(git_remote **out, const char *url);
+  int  git_remote_connect(git_remote *remote, int direction, const void *callbacks, const void *proxy_opts, const void *custom_headers);
+  int  git_remote_ls(void *out, size_t *size, git_remote *remote);
+  void git_remote_disconnect(git_remote *remote);
+
+  typedef struct {
+    int local;
+    git_oid oid;
+    git_oid loid;
+    char *name;
+    char *symref_target;
+  } git_remote_head;
 
   const char *git_reference_shorthand(const git_reference *ref);
 
@@ -586,6 +598,65 @@ function git2.clone(url, path, branch, depth, progress)
 	if prog_cb then prog_cb:free() end
 	if code ~= 0 then return nil, git_err() end
 	return Repo(rp[0])
+end
+
+---@param url string
+---@param ref string? optional ref name to look up (e.g. "HEAD", "refs/heads/main")
+---@return string|table<string, string>|nil, string?
+function git2.lsRemote(url, ref)
+	local rmt = RemotePtr()
+	local code = lib.git_remote_create_detached(rmt, url)
+	if code ~= 0 then return nil, git_err() end
+
+	code = lib.git_remote_connect(rmt[0], 0, nil, nil, nil) -- GIT_DIRECTION_FETCH
+	if code ~= 0 then
+		lib.git_remote_free(rmt[0])
+		return nil, git_err()
+	end
+
+	local slot = ffi.new("void*[1]")
+	local size = ffi.new("size_t[1]")
+	code = lib.git_remote_ls(slot, size, rmt[0])
+	if code ~= 0 then
+		lib.git_remote_disconnect(rmt[0])
+		lib.git_remote_free(rmt[0])
+		return nil, git_err()
+	end
+
+	local heads = ffi.cast("git_remote_head**", slot[0])
+	local n = tonumber(size[0])
+
+	if ref then
+		for i = 0, n - 1 do
+			local head = heads[i]
+			if head ~= nil then
+				local name = ffi.string(head.name)
+				if name == ref then
+					local sha = oidStr(head.oid)
+					lib.git_remote_disconnect(rmt[0])
+					lib.git_remote_free(rmt[0])
+					return sha
+				end
+			end
+		end
+		lib.git_remote_disconnect(rmt[0])
+		lib.git_remote_free(rmt[0])
+		return nil, "ref not found: " .. ref
+	end
+
+	local result = {}
+	for i = 0, n - 1 do
+		local head = heads[i]
+		if head ~= nil then
+			local name = ffi.string(head.name)
+			local sha = oidStr(head.oid)
+			result[name] = sha
+		end
+	end
+
+	lib.git_remote_disconnect(rmt[0])
+	lib.git_remote_free(rmt[0])
+	return result
 end
 
 ---@return string

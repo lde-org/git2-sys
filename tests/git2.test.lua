@@ -267,3 +267,26 @@ test.it("fetch progress callback fires with valid stats", function()
 	-- note: callback may not fire if fetch is already up-to-date
 	repo:free()
 end)
+
+-- NOTE: requires network access
+test.it("lsRemote returns HEAD sha for a remote URL", function()
+	local sha = git2.lsRemote("https://github.com/lde-org/lde", "HEAD")
+	test.truthy(sha, "HEAD sha should be returned")
+	test.equal(#sha, 40, "HEAD sha should be 40 chars")
+end)
+
+-- NOTE: requires network access
+test.it("lsRemote with no ref returns table of all refs", function()
+	local refs = git2.lsRemote("https://github.com/lde-org/lde")
+	test.truthy(refs, "should return a table")
+	test.truthy(refs["HEAD"], "table should contain HEAD")
+	test.equal(#refs["HEAD"], 40, "HEAD sha should be 40 chars")
+	test.truthy(refs["refs/heads/master"] or refs["refs/heads/main"], "table should contain a branch ref")
+end)
+
+-- NOTE: requires network access
+test.it("lsRemote returns nil for non-existent ref", function()
+	local sha, err = git2.lsRemote("https://github.com/lde-org/lde", "NONEXISTENT_REF")
+	test.falsy(sha, "should return nil for missing ref")
+	test.truthy(err, "should return an error message")
+end)
