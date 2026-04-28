@@ -210,7 +210,7 @@ test.it("fetch with depth=1 performs a shallow fetch", function()
 end)
 
 -- NOTE: requires network access
-test.it("updateSubmodules with depth=1 clones submodules shallowly", function()
+test.skip("updateSubmodules with depth=1 clones submodules shallowly", function()
 	local dir = mkTmp("shallow-sub") .. sep .. "repo"
 	-- clone without submodules so updateSubmodules has work to do
 	os.execute('git clone "https://github.com/lde-org/git2-sys" "' .. dir .. '" ' .. null)
@@ -229,7 +229,7 @@ test.it("clone progress callback fires with valid stats", function()
 		calls[#calls + 1] = {
 			total_objects = tonumber(stats.total_objects),
 			received_objects = tonumber(stats.received_objects),
-			received_bytes = tonumber(stats.received_bytes),
+			received_bytes = tonumber(stats.received_bytes)
 		}
 	end)
 	test.truthy(repo, "clone should succeed")
