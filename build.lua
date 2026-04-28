@@ -4,13 +4,14 @@ local isWindows = jit.os == "Windows"
 local isMac = jit.os == "OSX"
 local libName = isWindows and "git2.dll" or (isMac and "libgit2.dylib" or "libgit2.so")
 
-local url = "https://github.com/libgit2/libgit2/archive/refs/tags/v1.8.5.tar.gz"
-local tarball = "libgit2-1.8.5.tar.gz"
+local commit = "1888a166e43420b2a5f93f104f2a99ec049b073c"
+local url = "https://github.com/libgit2/libgit2/archive/" .. commit .. ".tar.gz"
+local tarball = "libgit2-" .. commit .. ".tar.gz"
 
 local content = build:fetch(url)
 build:write(tarball, content)
 build:extract(tarball, ".")
-build:move("libgit2-1.8.5", "libgit2")
+build:move("libgit2-" .. commit, "libgit2")
 
 local srcDir = build.outDir .. "/libgit2"
 local buildDir = srcDir .. "/build"
@@ -28,7 +29,7 @@ else
 end
 
 build:sh('cmake -S "' ..
-srcDir .. '" -B "' .. buildDir .. '" -DBUILD_SHARED_LIBS=ON -DUSE_HTTPS=' .. https .. ' ' .. gitMin)
+	srcDir .. '" -B "' .. buildDir .. '" -DBUILD_SHARED_LIBS=ON -DUSE_HTTPS=' .. https .. ' ' .. gitMin)
 build:sh('cmake --build "' .. buildDir .. '" --config Release' .. (isWindows and "" or " -j$(nproc)"))
 
 if isWindows then
