@@ -25,13 +25,32 @@ ffi.cdef [[
 
   typedef struct { unsigned int version; unsigned int checkout_strategy; char _rest[136]; } git_checkout_options;
 
-  /* git_fetch_options — layout verified against libgit2 headers on 64-bit.
-     Opaque padding hides git_remote_callbacks (128 B) and git_proxy_options
-     (40 B); only `depth` is exposed (GIT_FETCH_DEPTH_FULL=0, shallow=1+). */
+  typedef struct {
+    unsigned int total_objects;
+    unsigned int indexed_objects;
+    unsigned int received_objects;
+    unsigned int local_objects;
+    unsigned int total_deltas;
+    unsigned int indexed_deltas;
+    size_t received_bytes;
+  } git_indexer_progress;
+
+  typedef struct {
+    unsigned int version;
+    char _pad0[4];
+    char _sideband[8];
+    char _completion[8];
+    char _credentials[8];
+    char _certcheck[8];
+    int (*transfer_progress)(const git_indexer_progress *, void *);
+    char _rest[80];
+  } git_remote_callbacks;
+
+  /* git_fetch_options — layout verified against libgit2 headers on 64-bit. */
   typedef struct {
     int version;
     char _pad0[4];
-    char _callbacks[128];
+    git_remote_callbacks callbacks;
     int prune;
     unsigned int update_fetchhead;
     int download_tags;
@@ -149,6 +168,15 @@ lib.git_libgit2_init()
 ---@class git2.ffi.Reference: ffi.cdata*
 ---@class git2.ffi.Index: ffi.cdata*
 ---@class git2.ffi.Remote: ffi.cdata*
+---@class git2.ffi.Progress: ffi.cdata*
+---@field total_objects integer
+---@field indexed_objects integer
+---@field received_objects integer
+---@field local_objects integer
+---@field total_deltas integer
+---@field indexed_deltas integer
+---@field received_bytes integer
+
 ---@class git2.ffi.Signature: ffi.cdata*
 
 -- ffi type constructors
@@ -244,7 +272,7 @@ local Commit = ffi.metatype("git2_commit_t", {
 			lib.git_commit_free(self.ptr)
 			self.ptr = nil
 		end
-	end,
+	end
 })
 
 -- Repo — ffi object wrapping git_repository*
@@ -259,7 +287,7 @@ local Repo = ffi.metatype("git2_repo_t", {
 			lib.git_repository_free(self.ptr)
 			self.ptr = nil
 		end
-	end,
+	end
 })
 
 function RepoMethods:path()
@@ -373,32 +401,50 @@ end
 
 ---@param remoteName string
 ---@param depth integer? 1 for shallow, nil for full history
+---@param progress fun(info: git2.ffi.Progress)?
 ---@return true?, string?
-function RepoMethods:fetch(remoteName, depth)
+function RepoMethods:fetch(remoteName, depth, progress)
 	local rmt = RemotePtr()
 	local code = lib.git_remote_lookup(rmt, self.ptr, remoteName)
 	if code ~= 0 then return nil, git_err() end
 
 	local fopts = nil
-	if depth then
+	local prog_cb = nil
+	if depth or progress then
 		fopts = FetchOptions()
 		lib.git_fetch_options_init(fopts, 1)
-		fopts.depth = depth
+		if depth then fopts.depth = depth end
+		if progress then
+			prog_cb = ffi.cast("int (*)(const git_indexer_progress *, void *)", function(stats, _)
+				return progress(stats) and -1 or 0
+			end)
+			fopts.callbacks.transfer_progress = prog_cb
+		end
 	end
 
 	code = lib.git_remote_fetch(rmt[0], nil, fopts, nil)
 	lib.git_remote_free(rmt[0])
+	if prog_cb then prog_cb:free() end
 	if code ~= 0 then return nil, git_err() end
 
 	return true
 end
 
 ---@param depth integer? 1 for shallow submodule fetch, nil for full history
+---@param progress fun(info: git2.Progress)?
 ---@return true?, string?
-function RepoMethods:updateSubmodules(depth)
+function RepoMethods:updateSubmodules(depth, progress)
 	local opts = SubmoduleUpdateOptions()
 	lib.git_submodule_update_options_init(opts, 1)
 	if depth then opts.fetch_opts.depth = depth end
+
+	local prog_cb = nil
+	if progress then
+		prog_cb = ffi.cast("int (*)(const git_indexer_progress *, void *)", function(stats, _)
+			return progress(stats) and -1 or 0
+		end)
+		opts.fetch_opts.callbacks.transfer_progress = prog_cb
+	end
 
 	local sub_err
 	local cb = ffi.cast("int (*)(git_submodule*, const char*, void*)", function(sm)
@@ -409,6 +455,7 @@ function RepoMethods:updateSubmodules(depth)
 
 	local code = lib.git_submodule_foreach(self.ptr, cb, nil)
 	cb:free()
+	if prog_cb then prog_cb:free() end
 
 	if code ~= 0 then return nil, git_err() end
 	if sub_err then return nil, sub_err end
@@ -514,20 +561,29 @@ end
 ---@param path string
 ---@param branch string?
 ---@param depth integer? 1 for shallow clone, nil for full history
+---@param progress fun(info: git2.ffi.Progress)?
 ---@return git2.Repo?, string?
-function git2.clone(url, path, branch, depth)
+function git2.clone(url, path, branch, depth, progress)
 	local rp = RepositoryPtr()
 	local opts = nil
+	local prog_cb = nil
 
-	if branch or depth then
+	if branch or depth or progress then
 		local o = CloneOptions()
 		lib.git_clone_options_init(o, 1)
 		if branch then o.checkout_branch = branch end
 		if depth then o.fetch_opts.depth = depth end
+		if progress then
+			prog_cb = ffi.cast("int (*)(const git_indexer_progress *, void *)", function(stats, _)
+				return progress(stats) and -1 or 0
+			end)
+			o.fetch_opts.callbacks.transfer_progress = prog_cb
+		end
 		opts = o
 	end
 
 	local code = lib.git_clone(rp, url, path, opts)
+	if prog_cb then prog_cb:free() end
 	if code ~= 0 then return nil, git_err() end
 	return Repo(rp[0])
 end

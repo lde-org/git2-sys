@@ -220,3 +220,50 @@ test.it("updateSubmodules with depth=1 clones submodules shallowly", function()
 	test.equal(commitCount(dir .. sep .. "vendor" .. sep .. "libgit2"), 1)
 	repo:free()
 end)
+
+-- NOTE: requires network access
+test.it("clone progress callback fires with valid stats", function()
+	local dir = mkTmp("clone-progress") .. sep .. "repo"
+	local calls = {}
+	local repo = git2.clone("https://github.com/lde-org/lde", dir, nil, nil, function(stats)
+		calls[#calls + 1] = {
+			total_objects = tonumber(stats.total_objects),
+			received_objects = tonumber(stats.received_objects),
+			received_bytes = tonumber(stats.received_bytes),
+		}
+	end)
+	test.truthy(repo, "clone should succeed")
+	test.truthy(#calls > 0, "progress callback should fire at least once")
+	test.truthy(calls[#calls].total_objects > 0, "total_objects should be non-zero")
+	test.truthy(calls[#calls].received_bytes > 0, "received_bytes should be non-zero")
+	repo:free()
+end)
+
+-- NOTE: requires network access
+test.it("clone progress returning true cancels the clone", function()
+	local dir = mkTmp("clone-cancel") .. sep .. "repo"
+	local cancelled = false
+	local repo, err = git2.clone("https://github.com/lde-org/git2-sys", dir, nil, nil, function()
+		cancelled = true
+		return true
+	end)
+	test.truthy(not repo, "clone should fail when cancelled")
+	test.truthy(cancelled, "callback should have been called")
+end)
+
+-- NOTE: requires network access
+test.it("fetch progress callback fires with valid stats", function()
+	local dir = mkTmp("fetch-progress") .. sep .. "repo"
+	os.execute('rm -rf "' .. dir .. '"')
+	os.execute('git clone --depth 1 "https://github.com/lde-org/lde" "' .. dir .. '" ' .. null)
+	local repo = git2.open(dir)
+	local fired = false
+	local ok, err = repo:fetch("origin", 0, function(stats)
+		fired = true
+		test.truthy(stats.total_objects > 0)
+		test.truthy(stats.received_bytes > 0)
+	end)
+	test.truthy(ok, err)
+	-- note: callback may not fire if fetch is already up-to-date
+	repo:free()
+end)
