@@ -58,7 +58,7 @@ jobs:
           if [[ "${{ steps.cache-android-image.outputs.cache-hit }}" != "true" ]]; then
             docker run --privileged --platform linux/arm64 \
               --name termux-build termux/termux-docker:aarch64 \
-              bash -c "apt update && apt install -y clang cmake ninja openssl"
+              bash -c "apt update && apt install -y clang cmake ninja openssl git"
             docker commit termux-build termux-android:latest
             docker rm termux-build
             docker save termux-android:latest -o /tmp/termux-android.tar
