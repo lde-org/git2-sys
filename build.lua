@@ -36,9 +36,10 @@ if isWindows then
 	build:copy("libgit2/build/Release/git2.dll", libName)
 elseif isMac then
 	build:copy("libgit2/build/libgit2.dylib", libName)
-	build:sh('strip -x "' .. build.outDir .. '/' .. libName .. '"')
+	build:sh('strip -x -o "' .. build.outDir .. '/' .. libName .. '.stripped" "' .. build.outDir .. '/' .. libName .. '"')
+	build:move(libName .. '.stripped', libName)
 else
 	build:copy("libgit2/build/libgit2.so", libName)
-	build:sh('strip --strip-unneeded --remove-section=.eh_frame --remove-section=.eh_frame_hdr "' ..
-		build.outDir .. '/' .. libName .. '"')
+	build:sh('strip --strip-unneeded --remove-section=.eh_frame --remove-section=.eh_frame_hdr -o "' .. build.outDir .. '/' .. libName .. '.stripped" "' .. build.outDir .. '/' .. libName .. '"')
+	build:move(libName .. '.stripped', libName)
 end
