@@ -33,7 +33,13 @@ build:sh('cmake -S "' ..
 build:sh('cmake --build "' .. buildDir .. '" --config Release' .. (isWindows and "" or " -j$(nproc)"))
 
 if isWindows then
-	build:copy("libgit2/build/Release/git2.dll", libName)
+	-- The pinned libgit2 names its shared library libgit2.dll. Multi-config
+	-- generators (Ninja Multi-Config, Visual Studio) emit it under
+	-- build/Release/; single-config ones (MinGW Makefiles) under build/.
+	local dll = build:exists("libgit2/build/Release/libgit2.dll")
+		and "libgit2/build/Release/libgit2.dll"
+		or "libgit2/build/libgit2.dll"
+	build:copy(dll, libName)
 elseif isMac then
 	build:copy("libgit2/build/libgit2.dylib", libName)
 	build:sh('strip -x -o "' .. build.outDir .. '/' .. libName .. '.stripped" "' .. build.outDir .. '/' .. libName .. '"')
