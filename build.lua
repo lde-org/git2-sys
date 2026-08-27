@@ -28,8 +28,7 @@ else
 	https = "OpenSSL"
 end
 
-build:sh('cmake -S "' ..
-	srcDir .. '" -B "' .. buildDir .. '" -DBUILD_SHARED_LIBS=ON -DUSE_HTTPS=' .. https .. ' ' .. gitMin)
+build:sh('cmake -S "' .. srcDir .. '" -B "' .. buildDir .. '" -GNinja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DUSE_HTTPS=' .. https .. ' ' .. gitMin)
 build:sh('cmake --build "' .. buildDir .. '" --config Release' .. (isWindows and "" or " -j$(nproc)"))
 
 if isWindows then
