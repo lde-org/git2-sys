@@ -45,6 +45,7 @@ elseif isMac then
 	build:move(libName .. '.stripped', libName)
 else
 	build:copy("libgit2/build/libgit2.so", libName)
-	build:sh('strip --strip-unneeded --remove-section=.eh_frame --remove-section=.eh_frame_hdr -o "' .. build.outDir .. '/' .. libName .. '.stripped" "' .. build.outDir .. '/' .. libName .. '"')
+	local stripEhFrame = (build.target or ""):find("musl", 1, true) and "" or " --remove-section=.eh_frame --remove-section=.eh_frame_hdr"
+	build:sh('strip --strip-unneeded' .. stripEhFrame .. ' -o "' .. build.outDir .. '/' .. libName .. '.stripped" "' .. build.outDir .. '/' .. libName .. '"')
 	build:move(libName .. '.stripped', libName)
 end
