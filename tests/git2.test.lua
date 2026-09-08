@@ -75,6 +75,41 @@ test.it("open existing repo works", function()
 	repo:free()
 end)
 
+test.it("discover finds the enclosing repo from a nested directory", function()
+	local dir = mkTmp("discover")
+	mkCommit(dir, "discover")
+	local nested = mkTmp("discover" .. sep .. "packages" .. sep .. "pkg")
+	local repoPath, err = git2.discover(nested)
+	test.truthy(repoPath, err)
+	local repo = git2.open(dir)
+	test.equal(repoPath, repo:path())
+	repo:free()
+	-- the discovered path is itself openable
+	local found = git2.open(repoPath)
+	test.equal(found:isBare(), false)
+	test.truthy(found:workdir())
+	found:free()
+end)
+
+test.it("discover errors when no repository encloses the path", function()
+	-- ceiling at tmpBase keeps the assertion hermetic: without it, a repo
+	-- enclosing the temp dir (unusual TMPDIR) would make discovery succeed
+	local repoPath, err = git2.discover(mkTmp("discover-none"), false, tmpBase)
+	test.falsy(repoPath)
+	test.truthy(err)
+end)
+
+test.it("discover stops at ceilingDirs", function()
+	local dir = mkTmp("discover-ceiling")
+	mkCommit(dir, "ceiling")
+	local nested = mkTmp("discover-ceiling" .. sep .. "sub")
+	test.truthy(git2.discover(nested), "sanity: found without a ceiling")
+	-- the repo dir itself is the ceiling, so the search must stop before it
+	local repoPath, err = git2.discover(nested, false, dir)
+	test.falsy(repoPath)
+	test.truthy(err)
+end)
+
 test.it("head returns a 40-char sha", function()
 	local dir = mkTmp("head")
 	mkCommit(dir, "init")

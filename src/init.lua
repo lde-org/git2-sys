@@ -97,7 +97,11 @@ ffi.cdef [[
   int  git_submodule_update(git_submodule *submodule, int init, git_submodule_update_options *options);
   void git_submodule_free(git_submodule *submodule);
 
+  typedef struct { char *ptr; size_t reserved; size_t size; } git_buf;
+
   int  git_repository_open(git_repository **out, const char *path);
+  int  git_repository_discover(git_buf *out, const char *start_path, int across_fs, const char *ceiling_dirs);
+  void git_buf_dispose(git_buf *buffer);
   int  git_repository_init(git_repository **out, const char *path, unsigned is_bare);
   void git_repository_free(git_repository *repo);
   int  git_repository_is_bare(git_repository *repo);
@@ -191,6 +195,9 @@ lib.git_libgit2_init()
 
 ---@class git2.ffi.Signature: ffi.cdata*
 
+---@class git2.ffi.Buf # git_buf: libgit2-owned string buffer, disposed by the caller
+---@field ptr any # char*, NUL-terminated
+
 -- ffi type constructors
 
 ---@type fun(): git2.ffi.Oid
@@ -211,6 +218,8 @@ local ReferencePtr = ffi.typeof("git_reference*[1]")
 local IndexPtr = ffi.typeof("git_index*[1]")
 ---@type fun(): ffi.cdata*
 local RemotePtr = ffi.typeof("git_remote*[1]")
+---@type fun(): git2.ffi.Buf
+local Buf = ffi.typeof("git_buf")
 ---@type fun(): ffi.cdata*
 local CheckoutOptions = ffi.typeof("git_checkout_options")
 ---@type fun(): ffi.cdata*
@@ -557,6 +566,24 @@ function git2.open(path)
 	local code = lib.git_repository_open(rp, path)
 	if code ~= 0 then return nil, git_err() end
 	return Repo(rp[0])
+end
+
+--- Finds the repository that encloses `startPath` by walking up its parent
+--- directories. Unlike open, which needs the exact repository or workdir path, this locates a repository from any directory
+--- inside its worktree like a package nested in a monorepo.
+---@param startPath string
+---@param acrossFs boolean? # keep searching past filesystem boundaries (default false)
+---@param ceilingDirs string? # path-list (":" on unix, ";" on Windows) of directories the search must not go above
+---@return string? repoPath # absolute path to the repository's git directory
+---@return string? err
+function git2.discover(startPath, acrossFs, ceilingDirs)
+	local buf = Buf()
+	local code = lib.git_repository_discover(buf, startPath, acrossFs and 1 or 0, ceilingDirs)
+	if code ~= 0 then return nil, git_err() end
+
+	local repoPath = ffi.string(buf.ptr)
+	lib.git_buf_dispose(buf)
+	return repoPath
 end
 
 ---@param path string
